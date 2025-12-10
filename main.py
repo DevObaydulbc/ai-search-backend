@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 import requests
 from bs4 import BeautifulSoup
 
@@ -9,66 +9,59 @@ def root():
     return {"status": "Backend OK", "service": "AI Search BD", "version": "1.0"}
 
 # ---------------------------
-# Wikipedia Search (bn + en)
+# 1) Wikipedia Search (Bangla + English)
 # ---------------------------
-@app.get("/search/wiki")
+@app.get("/wiki")
 def wiki_search(q: str, lang: str = "bn"):
-    wiki_url = f"https://{lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch={q}&utf8=&format=json"
-
-    res = requests.get(wiki_url)
-    data = res.json()
-
-    results = []
-    for item in data.get("query", {}).get("search", []):
-        results.append({
-            "title": item["title"],
-            "url": f"https://{lang}.wikipedia.org/wiki/{item['title']}",
-            "snippet": item["snippet"],
-            "source": f"wikipedia-{lang}"
-        })
-    return {"query": q, "results": results}
-
+    try:
+        wiki_url = f"https://{lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch={q}&utf8=&format=json"
+        res = requests.get(wiki_url, timeout=10)
+        data = res.json()
+        results = []
+        for item in data.get("query", {}).get("search", []):
+            results.append({
+                "title": item["title"],
+                "url": f"https://{lang}.wikipedia.org/wiki/{item['title']}",
+                "snippet": item["snippet"].replace("<span class=\"searchmatch\">", "").replace("</span>", ""),
+                "source": f"wikipedia-{lang}"
+            })
+        return {"query": q, "results": results}
+    except Exception as e:
+        return {"error": str(e)}
 
 # ---------------------------
-# BD GOV Scraper
+# 2) BD GOV Scraper
 # ---------------------------
-@app.get("/search/gov")
+@app.get("/gov")
 def gov_scrape(url: str):
-    res = requests.get(url)
-    soup = BeautifulSoup(res.text, "html.parser")
-
-    title = soup.find("title").get_text(strip=True) if soup.find("title") else ""
-    headings = [h.get_text(strip=True) for h in soup.find_all("h1")]
-    officers = [t.get_text(strip=True) for t in soup.find_all("td")]
-
-    return {
-        "page_title": title,
-        "h1": headings,
-        "td": officers[:50]  # limit
-    }
-
+    try:
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+        title = soup.find("title").get_text(strip=True) if soup.find("title") else ""
+        headings = [h.get_text(strip=True) for h in soup.find_all("h1")]
+        officers = [t.get_text(strip=True) for t in soup.find_all("td")]
+        return {"page_title": title, "h1": headings, "td": officers[:50]}
+    except Exception as e:
+        return {"error": str(e)}
 
 # ---------------------------
-# News RSS Search
+# 3) News (Example using Google News RSS)
 # ---------------------------
-@app.get("/search/news")
+@app.get("/news")
 def news_search(q: str):
-    rss_feeds = [
-        "https://www.prothomalo.com/rss",
-        "https://bdnews24.com/rss"
-    ]
-    results = []
-
-    for feed in rss_feeds:
-        res = requests.get(feed)
+    try:
+        rss_url = f"https://news.google.com/rss/search?q={q}+site:bd"
+        res = requests.get(rss_url, timeout=10)
         soup = BeautifulSoup(res.text, "xml")
-        items = soup.find_all("item")
-        for item in items:
-            if q.lower() in item.title.text.lower():
-                results.append({
-                    "title": item.title.text,
-                    "url": item.link.text,
-                    "source": feed,
-                    "snippet": item.description.text if item.description else ""
-                })
-    return {"query": q, "results": results[:20]}
+        items = soup.find_all("item")[:15]
+        results = []
+        for i in items:
+            results.append({
+                "title": i.title.text,
+                "url": i.link.text,
+                "snippet": i.description.text if i.description else "",
+                "source": "google-news"
+            })
+        return {"query": q, "results": results}
+    except Exception as e:
+        return {"error": str(e)}
